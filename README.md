@@ -68,9 +68,15 @@ Docker: `docker build -t agentic-rag . && docker run -p 7860:7860 -e ANTHROPIC_A
 
 ## Deploy
 
-**One command from your machine** (needs `gh auth login` and `hf auth login` once):
+**One command from your machine.** It asks you to log in to GitHub in the browser and to paste a Hugging Face Write token the first time.
+
+```powershell
+# Windows (needs Git, GitHub CLI, Python: winget install Git.Git GitHub.cli Python.Python.3.12)
+powershell -ExecutionPolicy Bypass -File .\publish.ps1
+```
 
 ```bash
+# macOS / Linux (needs git, gh, python3)
 ./publish.sh
 ```
 

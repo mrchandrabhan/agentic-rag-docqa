@@ -28,20 +28,4 @@ jobs:
             echo "::warning::HF_TOKEN secret not set; skipping Space deploy."
             exit 0
           fi
-          python - <<'EOF'
-          import os
-          from huggingface_hub import HfApi
-
-          api = HfApi(token=os.environ["HF_TOKEN"])
-          user = api.whoami()["name"]
-          repo_id = f"{user}/{os.environ['SPACE_NAME']}"
-          api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True)
-          api.upload_folder(
-              repo_id=repo_id,
-              repo_type="space",
-              folder_path=".",
-              ignore_patterns=[".git/*", ".github/*", "tests/*", "logs/*", "**/__pycache__/*", "publish.sh"],
-              commit_message=f"Deploy {os.environ.get('GITHUB_SHA', '')[:7]} from GitHub",
-          )
-          print(f"Live at https://huggingface.co/spaces/{repo_id}")
-          EOF
+          python scripts/deploy_space.py

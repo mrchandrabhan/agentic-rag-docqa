@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot publish from your own computer: creates the GitHub repo, pushes, and deploys the Hugging Face Space.
-# Needs: git, GitHub CLI (`gh auth login` once), Python with huggingface_hub (`hf auth login` once).
+# Needs: git, GitHub CLI (`gh auth login` once), Python 3 (you'll be asked for a Hugging Face Write token the first time).
 #   ./publish.sh               # repo + Space both named agentic-rag-docqa
 #   ./publish.sh my-other-name
 set -euo pipefail
@@ -22,19 +22,6 @@ gh repo edit "$GH_USER/$NAME" --add-topic rag,langgraph,langchain,faiss,chromadb
 
 # 2) Hugging Face Space
 python3 -m pip install -q "huggingface_hub>=1.0"
-python3 - "$NAME" <<'EOF'
-import sys
-from huggingface_hub import HfApi, get_token
-
-name = sys.argv[1]
-if not get_token():
-    sys.exit("Run `hf auth login` (Write token from https://huggingface.co/settings/tokens) and re-run.")
-api = HfApi()
-repo_id = f"{api.whoami()['name']}/{name}"
-api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True)
-api.upload_folder(repo_id=repo_id, repo_type="space", folder_path=".",
-                  ignore_patterns=[".git/*", ".github/*", "tests/*", "logs/*", "**/__pycache__/*", "publish.sh"])
-print(f"\nLive:  https://huggingface.co/spaces/{repo_id}")
-EOF
+python3 scripts/deploy_space.py "$NAME"
 echo "Code:  https://github.com/$GH_USER/$NAME"
 echo "Tip: add an HF_TOKEN repo secret on GitHub so every push to main redeploys the Space automatically."
