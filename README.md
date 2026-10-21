@@ -16,7 +16,7 @@ license: mit
 
 Upload PDFs, Word docs or text files and ask questions. Every answer is grounded in your documents and cites the **file and page** it came from. A **LangGraph** agent decides when retrieval is good enough to answer, rewrites the query when it isn't, and says *"I couldn't find that"* instead of guessing.
 
-**Live demo:** https://agentic-rag-docqa.onrender.com (free tier: the first visit after a while takes ~30–60 s to wake up). Click **Load sample documents** to try it without your own files.
+**Live demo:** https://agentic-rag-docqa-dwvv.onrender.com (free tier: the first visit after a while takes ~30–60 s to wake up). Click **Load sample documents** to try it without your own files.
 
 ## How it works
 
