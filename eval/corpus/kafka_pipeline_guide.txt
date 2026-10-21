@@ -1,0 +1,16 @@
+Event Pipeline Guide
+
+Topics and partitions
+Click events are written to the topic web.clicks.v1, which has 12 partitions keyed by user id so that one user's events stay in order. Order events use the topic orders.v2 with 6 partitions keyed by order id.
+
+Retention
+Raw topics keep data for 7 days. The compacted topic customer.profile keeps only the latest record per key and has no time-based deletion.
+
+Consumers
+The analytics consumer group reads web.clicks.v1 and writes hourly aggregates to the PostgreSQL warehouse. Consumer lag above 50,000 messages for more than 10 minutes triggers an alert to the data platform channel.
+
+Schema changes
+Producers must register schema changes in the schema registry. Only backward-compatible changes are allowed on an existing topic; a breaking change requires a new versioned topic, for example moving from orders.v2 to orders.v3.
+
+Dead letters
+Messages that fail deserialization three times are sent to the dead-letter topic pipeline.dlq and reviewed every morning.

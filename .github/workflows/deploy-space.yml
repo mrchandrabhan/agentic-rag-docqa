@@ -1,0 +1,47 @@
+name: Deploy to Hugging Face Space
+
+# Every push to main mirrors the app to a Hugging Face Space (creating it on the first run).
+# One-time setup: GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret
+#   HF_TOKEN = a Hugging Face access token with "Write" permission
+# Optional repository variable HF_SPACE_NAME (defaults to agentic-rag-docqa).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "huggingface_hub>=1.0"
+      - name: Create Space if needed and upload app
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SPACE_NAME: ${{ vars.HF_SPACE_NAME || 'agentic-rag-docqa' }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::warning::HF_TOKEN secret not set; skipping Space deploy."
+            exit 0
+          fi
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          user = api.whoami()["name"]
+          repo_id = f"{user}/{os.environ['SPACE_NAME']}"
+          api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True)
+          api.upload_folder(
+              repo_id=repo_id,
+              repo_type="space",
+              folder_path=".",
+              ignore_patterns=[".git/*", ".github/*", "tests/*", "logs/*", "**/__pycache__/*", "publish.sh"],
+              commit_message=f"Deploy {os.environ.get('GITHUB_SHA', '')[:7]} from GitHub",
+          )
+          print(f"Live at https://huggingface.co/spaces/{repo_id}")
+          EOF

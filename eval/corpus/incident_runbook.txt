@@ -1,0 +1,13 @@
+Production Incident Runbook
+
+Severity levels
+A SEV1 incident means the customer-facing site is down or data is being lost. SEV1 pages the on-call engineer immediately and requires an incident commander within 15 minutes. A SEV2 incident means a major feature is degraded but a workaround exists; the on-call engineer must acknowledge it within 30 minutes. SEV3 covers minor bugs and is handled in normal business hours.
+
+First response
+The on-call engineer opens an incident channel, posts the current status every 30 minutes, and records a timeline. Before restarting anything, capture logs and a heap dump if memory pressure is suspected.
+
+Rollback policy
+If a deployment in the last two hours is the likely cause, roll back first and debug second. Rollbacks are done through the CI/CD pipeline using the previous tagged release, never by editing servers by hand.
+
+Postmortems
+Every SEV1 and SEV2 incident gets a blameless postmortem within five business days. The postmortem lists the root cause, the detection gap, and at most three action items, each with an owner and a due date.
