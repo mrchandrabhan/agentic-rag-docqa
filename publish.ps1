@@ -1,4 +1,4 @@
-# One-shot publish for Windows PowerShell: GitHub repo + Hugging Face Space.
+# One-shot publish for Windows PowerShell: installs Git/GitHub CLI if missing, then GitHub repo + Hugging Face Space.
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1 -Name my-other-name
 param([string]$Name = "agentic-rag-docqa")
@@ -6,15 +6,25 @@ $ErrorActionPreference = "Continue"
 function Check($what) { if ($LASTEXITCODE -ne 0) { Write-Host "$what failed (exit $LASTEXITCODE)." -ForegroundColor Red; exit 1 } }
 Set-Location $PSScriptRoot
 
-function Need($cmd, $hint) {
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "User")
+}
+function Need($cmd, $wingetId) {
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) { return }
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "Installing $wingetId ..." -ForegroundColor Cyan
+        winget install --id $wingetId -e --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+    }
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Write-Host "Missing '$cmd'. $hint" -ForegroundColor Yellow
+        Write-Host "Missing '$cmd'. Install it with:  winget install --id $wingetId -e" -ForegroundColor Yellow
         Write-Host "Then CLOSE and REOPEN PowerShell and run this script again."
         exit 1
     }
 }
-Need git "Install it with:  winget install --id Git.Git -e"
-Need gh  "Install it with:  winget install --id GitHub.cli -e"
+Need git "Git.Git"
+Need gh  "GitHub.cli"
 $py = $null
 foreach ($c in "py", "python") {   # skip the Microsoft Store "python" stub, which exists but doesn't run
     if (Get-Command $c -ErrorAction SilentlyContinue) { & $c -c "import sys" *> $null; if ($LASTEXITCODE -eq 0) { $py = $c; break } }
@@ -30,6 +40,7 @@ if (-not (Test-Path .git)) {
     git init -q -b main
     git add -A
     git commit -qm "Initial commit: agentic RAG document Q&A"
+    Check "git commit"
 }
 git remote get-url origin *> $null
 if ($LASTEXITCODE -ne 0) {
