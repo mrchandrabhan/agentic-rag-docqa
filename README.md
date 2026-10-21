@@ -13,11 +13,10 @@ license: mit
 # Agentic RAG Document Q&A
 
 [![CI](https://github.com/mrchandrabhan/agentic-rag-docqa/actions/workflows/ci.yml/badge.svg)](https://github.com/mrchandrabhan/agentic-rag-docqa/actions/workflows/ci.yml)
-[![Deploy to HF Space](https://github.com/mrchandrabhan/agentic-rag-docqa/actions/workflows/deploy-space.yml/badge.svg)](https://github.com/mrchandrabhan/agentic-rag-docqa/actions/workflows/deploy-space.yml)
 
 Upload PDFs, Word docs or text files and ask questions. Every answer is grounded in your documents and cites the **file and page** it came from. A **LangGraph** agent decides when retrieval is good enough to answer, rewrites the query when it isn't, and says *"I couldn't find that"* instead of guessing.
 
-**Live demo:** https://huggingface.co/spaces/mrchandrabhan/agentic-rag-docqa
+**Live demo:** https://agentic-rag-docqa.onrender.com (free tier: the first visit after a while takes ~30–60 s to wake up). Click **Load sample documents** to try it without your own files.
 
 ## How it works
 
@@ -34,7 +33,7 @@ question ─► retrieve top-k ─► grade relevance ──relevant──► ge
 |---|---|
 | Loading | `pypdf` (per page), `docx2txt`, plain text/Markdown; multi-file upload |
 | Chunking | LangChain `RecursiveCharacterTextSplitter`, page metadata kept on every chunk |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384-d, normalized → cosine) |
+| Embeddings | `all-MiniLM-L6-v2` (384-d) on ONNX Runtime via `fastembed`: no PyTorch, fits a 512 MB instance |
 | Vector store | FAISS `IndexFlatIP` or ChromaDB (cosine HNSW), switchable in the UI |
 | Agent | LangGraph state machine: retrieve → grade → rewrite/generate → cite |
 | Generation | Anthropic Claude (LangChain `ChatAnthropic`), Hugging Face Inference (Mistral-7B-Instruct), or a no-key extractive fallback |
@@ -68,7 +67,13 @@ Docker: `docker build -t agentic-rag . && docker run -p 7860:7860 -e ANTHROPIC_A
 
 ## Deploy
 
-**One command from your machine.** It asks you to log in to GitHub in the browser and to paste a Hugging Face Write token the first time.
+### Render (free, used for the live demo)
+
+`render.yaml` is a Render Blueprint: on render.com choose **New → Blueprint**, pick this repo, **Apply**. The build installs dependencies and pre-downloads the embedding model; every push to `main` redeploys.
+
+### GitHub + Hugging Face Spaces
+
+Hugging Face now requires a PRO plan to host Gradio Spaces. With one, a single command publishes both. It asks you to log in to GitHub in the browser and for a Hugging Face Write token the first time.
 
 ```powershell
 # Windows (needs Git, GitHub CLI, Python: winget install Git.Git GitHub.cli Python.Python.3.12)
@@ -84,7 +89,7 @@ It creates the GitHub repo, pushes, creates the Gradio Space and uploads the app
 
 **Continuous deploy:** add a Hugging Face *Write* token as the GitHub Actions secret `HF_TOKEN`. Every push to `main` then redeploys the Space via `.github/workflows/deploy-space.yml`, and CI publishes a MiniLM eval table (FAISS vs ChromaDB) in the run summary.
 
-> Don't add your Anthropic key as a Space secret unless you're happy for visitors to spend your credits. Without one, the Space answers in extractive mode, or visitors can paste their own key (never stored).
+> Don't add your Anthropic key as a Render/Space secret unless you're happy for visitors to spend your credits. Without one, the Space answers in extractive mode, or visitors can paste their own key (never stored).
 
 ## Tests
 
@@ -98,10 +103,11 @@ pytest -q
 ## Project layout
 
 ```
-app.py              Gradio UI
+app.py              Gradio UI (sample docs + example questions)
+render.yaml         Render Blueprint (free live demo)
 rag/loaders.py      page-aware file loading
 rag/chunking.py     chunking with source/page metadata
-rag/embeddings.py   MiniLM embedder + offline hash embedder
+rag/embeddings.py   MiniLM (ONNX) embedder + offline hash embedder
 rag/stores.py       FAISS and ChromaDB behind one interface
 rag/llm.py          Claude / Hugging Face / extractive backends
 rag/graph.py        LangGraph agent
@@ -119,6 +125,8 @@ tests/              pytest suite
 | `HF_TOKEN` | – | Use the Hugging Face Inference API |
 | `HF_MODEL` | `mistralai/Mistral-7B-Instruct-v0.3` | HF model |
 | `EMBEDDER` | `minilm` | `hash` for an offline, download-free embedder |
+| `MODEL_CACHE` | `./.models` | Where the embedding model is cached |
+| `PORT` | `7860` | Port to bind (set automatically on Render) |
 
 ## Roadmap
 

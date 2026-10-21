@@ -1,0 +1,19 @@
+# Render Blueprint: free web service for the live demo.
+# render.com -> New -> Blueprint -> pick this repo -> Apply. Every push to main redeploys.
+services:
+  - type: web
+    name: agentic-rag-docqa
+    runtime: python
+    plan: free
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt && python -c "from rag.embeddings import warmup; warmup()"
+    startCommand: python app.py
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: MODEL_CACHE
+        value: /opt/render/project/src/.models
+      - key: GRADIO_ANALYTICS_ENABLED
+        value: "False"

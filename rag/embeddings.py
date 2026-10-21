@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -13,8 +16,30 @@ def _normalize(v: np.ndarray) -> np.ndarray:
     return (v / norms).astype("float32")
 
 
+MINILM = "sentence-transformers/all-MiniLM-L6-v2"
+MODEL_CACHE = os.getenv("MODEL_CACHE", str(Path(__file__).resolve().parent.parent / ".models"))
+
+
+class FastEmbedEmbedder:
+    """Default semantic embedder: all-MiniLM-L6-v2 (384-d) on ONNX Runtime via fastembed.
+
+    Same model as sentence-transformers but no PyTorch, so it fits a 512 MB free-tier instance.
+    """
+
+    def __init__(self, model_name: str = MINILM):
+        from fastembed import TextEmbedding
+
+        self.model_name = model_name
+        self.model = TextEmbedding(model_name=model_name, cache_dir=MODEL_CACHE)
+        self.dim = 384
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        vecs = list(self.model.embed(texts, batch_size=32))
+        return _normalize(np.asarray(vecs, dtype="float32"))
+
+
 class SentenceTransformerEmbedder:
-    """Default semantic embedder (all-MiniLM-L6-v2, 384-d), runs on CPU."""
+    """Same MiniLM model on PyTorch (used if fastembed isn't installed)."""
 
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         from sentence_transformers import SentenceTransformer
@@ -55,8 +80,16 @@ class HashEmbedder:
 def make_embedder(kind: str = "minilm"):
     if kind == "hash":
         return HashEmbedder()
-    try:
-        return SentenceTransformerEmbedder()
-    except Exception as exc:  # model download blocked / package missing
-        print(f"[embeddings] falling back to HashEmbedder: {exc}")
-        return HashEmbedder()
+    for cls in (FastEmbedEmbedder, SentenceTransformerEmbedder):
+        try:
+            return cls()
+        except Exception as exc:  # package missing / model download blocked
+            print(f"[embeddings] {cls.__name__} unavailable: {exc}", file=sys.stderr)
+    print("[embeddings] falling back to HashEmbedder", file=sys.stderr)
+    return HashEmbedder()
+
+
+def warmup() -> None:
+    """Download the model at build time so the first request doesn't wait for it."""
+    e = make_embedder()
+    print(f"[embeddings] ready: {e.model_name} (dim {e.dim}, cache {MODEL_CACHE})")

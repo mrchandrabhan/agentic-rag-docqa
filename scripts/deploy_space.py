@@ -11,7 +11,7 @@ from pathlib import Path
 from huggingface_hub import HfApi, get_token, login
 
 IGNORE = [".git/*", ".github/*", "tests/*", "logs/*", "scripts/*", "**/__pycache__/*",
-          ".pytest_cache/*", "publish.sh", "publish.ps1"]
+          ".pytest_cache/*", ".models/*", "publish.sh", "publish.ps1", "render.yaml"]
 
 
 def main() -> None:
