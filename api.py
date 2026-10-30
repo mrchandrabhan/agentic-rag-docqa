@@ -4,12 +4,13 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import threading
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from rag import DocQA
 from rag.embeddings import make_embedder
@@ -24,12 +25,21 @@ CORPUS_DIR = Path(__file__).parent / "eval" / "corpus"
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
+    @field_validator("question")
+    @classmethod
+    def question_must_contain_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Question cannot be blank.")
+        return normalized
+
 
 class RAGEngine:
     """Process-local index over the existing agentic RAG implementation."""
 
     def __init__(self) -> None:
         embedder_kind = os.getenv("EMBEDDER", "minilm")
+        self._lock = threading.RLock()
         self.qa = DocQA(
             embedder=make_embedder(embedder_kind),
             store=os.getenv("RAG_STORE", "faiss"),
@@ -71,16 +81,20 @@ class RAGEngine:
         destination = self.upload_root / str(uuid.uuid4()) / safe_name
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
-        stats = self.qa.ingest([destination])
-        self.documents[digest] = {
-            "filename": safe_name,
-            "sha256": digest,
-            "source": "upload",
-        }
-        return {"filename": safe_name, "sha256": digest, **stats}
+        with self._lock:
+            if digest in self.documents:
+                raise FileExistsError("This exact document has already been indexed.")
+            stats = self.qa.ingest([destination])
+            self.documents[digest] = {
+                "filename": safe_name,
+                "sha256": digest,
+                "source": "upload",
+            }
+            return {"filename": safe_name, "sha256": digest, **stats}
 
     def ask(self, question: str) -> dict[str, Any]:
-        result = self.qa.ask(question)
+        with self._lock:
+            result = self.qa.ask(question)
         return {
             "question": result["question"],
             "answer": result["answer"],
@@ -91,23 +105,30 @@ class RAGEngine:
         }
 
     def list_documents(self) -> list[dict[str, str]]:
-        return [
-            {"filename": item["filename"], "source": item["source"]}
-            for item in self.documents.values()
-        ]
+        with self._lock:
+            return [
+                {"filename": item["filename"], "source": item["source"]}
+                for item in self.documents.values()
+            ]
+
+
+engine_init_lock = threading.Lock()
 
 
 def get_qa(request: Request) -> RAGEngine:
     engine = getattr(request.app.state, "rag_engine", None)
     if engine is None:
-        try:
-            engine = RAGEngine()
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="RAG engine could not initialize. Check model and dependency configuration.",
-            ) from exc
-        request.app.state.rag_engine = engine
+        with engine_init_lock:
+            engine = getattr(request.app.state, "rag_engine", None)
+            if engine is None:
+                try:
+                    engine = RAGEngine()
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="RAG engine could not initialize. Check model and dependency configuration.",
+                    ) from exc
+                request.app.state.rag_engine = engine
     return engine
 
 
