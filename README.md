@@ -40,11 +40,11 @@ From the repository root:
 **Windows PowerShell**
 
 ```powershell
-$env:EMBEDDER = "hash"
+$env:EMBEDDER = "minilm"
 uvicorn api:app --host 0.0.0.0 --port 7861
 ```
 
-Use EMBEDDER=minilm for the MiniLM semantic embedder after the model is available locally. The hash embedder is quick and deterministic for offline development but is less semantically capable. Set ANTHROPIC_API_KEY or HF_TOKEN to use a hosted answer model; without credentials the existing extractive answer mode is used.
+Use EMBEDDER=minilm for normal use. MiniLM provides semantic vector retrieval. The hash embedder is only a quick deterministic option for offline CI or smoke tests; it is not a semantic model. Retrieval now combines vector similarity with BM25-style lexical ranking to improve exact technology, acronym, and name matching. Set ANTHROPIC_API_KEY or HF_TOKEN to use a hosted answer model; without credentials the extractive fallback is used and requires more literal word overlap.
 
 Endpoints:
 
@@ -53,6 +53,7 @@ Endpoints:
 - GET /api/v1/documents — list sample and uploaded documents in this process.
 - POST /api/v1/documents — index a PDF, DOCX, TXT, or Markdown file (10 MiB maximum).
 - POST /api/v1/ask — answer a question with citations, trace, and latency.
+- POST /api/v1/retrieve — diagnostic top passages with source/page and retrieval score (useful when debugging a document that was indexed but is not being retrieved).
 
 Open http://localhost:7861/docs for interactive API documentation.
 
