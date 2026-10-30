@@ -144,11 +144,12 @@ def test_weak_retrieval_triggers_one_rewrite_then_abstains():
 
 
 def test_rewrite_recovers_when_query_improves(qa):
-    qa.min_score = 0.02  # make the raw question fail grading
+    qa.min_score = 0.01  # one lexical RRF result passes after the query is rewritten
+    qa.semantic_min_score = 1.1  # isolate the lexical rewrite path in this graph test
     qa._graph = None
     fake = FakeLLM(answer="Twelve [1].", rewrite_to="click events topic web.clicks.v1 has 12 partitions keyed by user id")
     qa.set_llm(fake)
-    res = qa.ask("partitions?")
+    res = qa.ask("qzxvblarg123")
     assert fake.rewrites == 1 and res["citations"]
 
 
