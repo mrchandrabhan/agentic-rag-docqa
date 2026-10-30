@@ -94,8 +94,8 @@ def hybrid_search(
             length_norm = 1 - 0.75 + 0.75 * len(doc_terms) / max(avg_length, 1.0)
             for term in query_terms:
                 df = doc_freq.get(term, 0)
-                if not df:
-                    continue
+                # Missing query terms still count in the coverage denominator;
+                # otherwise one generic word can look like a perfect match.
                 idf = math.log(1 + (total_docs - df + 0.5) / (df + 0.5))
                 total_weight += idf
                 if frequencies[term]:
@@ -112,7 +112,7 @@ def hybrid_search(
                 and matched[0] not in GENERIC_SINGLE_MATCH_TERMS
                 and doc_freq.get(matched[0], total_docs) < total_docs
             )
-            if coverage >= 0.25 or len(matched) >= 2 or distinctive_single:
+            if coverage >= 0.35 or len(matched) >= 2 or distinctive_single:
                 scored.append((bm25_score, chunk.id, len(matched)))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
