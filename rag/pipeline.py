@@ -15,7 +15,7 @@ from .stores import make_store
 
 # Minimum semantic similarity depends on the embedder's score scale. Hybrid
 # retrieval also admits BM25 lexical matches, then uses reciprocal-rank fusion.
-SEMANTIC_MIN_SCORE = {"minilm": 0.25, "hash": 0.08}
+SEMANTIC_MIN_SCORE = {"minilm": 0.25, "hash": 0.23}
 HYBRID_MIN_SCORE = 0.012
 
 
