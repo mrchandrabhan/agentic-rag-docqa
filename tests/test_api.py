@@ -1,0 +1,92 @@
+from fastapi.testclient import TestClient
+
+from api import app, get_qa
+
+
+class FakeEngine:
+    def __init__(self):
+        self.indexed = []
+
+    def ask(self, question):
+        return {
+            "question": question,
+            "answer": "The incident acknowledgement target is five minutes [1].",
+            "citations": [
+                {
+                    "n": 1,
+                    "source": "incident-runbook.md",
+                    "page": 1,
+                    "score": 0.91,
+                    "text": "Acknowledge a production incident within five minutes.",
+                }
+            ],
+            "trace": ["retrieve: 1 chunks", "grade: 1/1", "generate: extractive", "cite: 1 citations"],
+            "latency_ms": 8.2,
+            "engine": "agentic-rag-docqa",
+        }
+
+    def ingest_bytes(self, filename, content):
+        self.indexed.append((filename, content))
+        return {"filename": filename, "files": 1, "pages": 1, "chunks": 1}
+
+    def list_documents(self):
+        return [{"filename": name, "source": "upload"} for name, _ in self.indexed]
+
+
+def setup_client():
+    fake = FakeEngine()
+    app.dependency_overrides[get_qa] = lambda: fake
+    return TestClient(app), fake
+
+
+def teardown_client(client):
+    client.close()
+    app.dependency_overrides.clear()
+
+
+def test_health_is_live_without_loading_model():
+    client = TestClient(app)
+    try:
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+    finally:
+        client.close()
+
+
+def test_ask_returns_answer_with_page_citations():
+    client, _ = setup_client()
+    try:
+        response = client.post("/api/v1/ask", json={"question": "What is the incident acknowledgement target?"})
+        assert response.status_code == 200
+        body = response.json()
+        assert "five minutes" in body["answer"]
+        assert body["citations"][0]["source"] == "incident-runbook.md"
+        assert body["citations"][0]["page"] == 1
+    finally:
+        teardown_client(client)
+
+
+def test_upload_and_list_document():
+    client, fake = setup_client()
+    try:
+        response = client.post(
+            "/api/v1/documents",
+            files={"file": ("runbook.md", b"# Runbook\nAcknowledge incidents quickly.", "text/markdown")},
+        )
+        assert response.status_code == 200
+        assert response.json()["chunks"] == 1
+        listing = client.get("/api/v1/documents")
+        assert listing.json()["documents"][0]["filename"] == "runbook.md"
+        assert len(fake.indexed) == 1
+    finally:
+        teardown_client(client)
+
+
+def test_empty_question_is_rejected():
+    client, _ = setup_client()
+    try:
+        response = client.post("/api/v1/ask", json={"question": "   "})
+        assert response.status_code == 422
+    finally:
+        teardown_client(client)

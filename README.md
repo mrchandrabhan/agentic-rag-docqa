@@ -14,82 +14,67 @@ license: mit
 
 [![CI](https://github.com/mrchandrabhan/agentic-rag-docqa/actions/workflows/ci.yml/badge.svg)](https://github.com/mrchandrabhan/agentic-rag-docqa/actions/workflows/ci.yml)
 
-Upload PDFs, Word docs or text files and ask questions. Every answer is grounded in your documents and cites the **file and page** it came from. A **LangGraph** agent decides when retrieval is good enough to answer, rewrites the query when it isn't, and says *"I couldn't find that"* instead of guessing.
+Upload PDFs, Word docs or text files and ask questions. Every answer is grounded in your documents and cites the file and page it came from. A LangGraph agent retrieves, grades relevance, rewrites the query when it isn't strong enough, and abstains instead of guessing.
 
-**Live demo:** https://agentic-rag-docqa-dwvv.onrender.com (free tier: the first visit after a while takes ~30–60 s to wake up). Click **Load sample documents** to try it without your own files.
+**Live demo:** https://agentic-rag-docqa-dwvv.onrender.com
 
-## How it works
+## Role in the portfolio
+
+This repository is the reusable knowledge and retrieval engine for the separate **Nexus AI** enterprise workspace. It remains independently runnable and independently tested. Nexus calls its HTTP adapter; it does not reimplement this repository's document loaders, chunking, embeddings, vector search, LangGraph workflow, or citation validation.
+
+## Existing RAG pipeline
 
 ```
-upload ─► load (PDF/DOCX/TXT/MD, page-aware) ─► chunk (800 chars, 120 overlap)
-       ─► embed (all-MiniLM-L6-v2) ─► index (FAISS or ChromaDB)
-
-question ─► retrieve top-k ─► grade relevance ──relevant──► generate ─► validate citations ─► answer + sources
-                  ▲                │
-                  └── rewrite ◄────┘ weak (1 retry)  ──still weak──► abstain
+upload -> page-aware load -> chunk -> MiniLM embeddings -> FAISS or Chroma
+question -> retrieve -> grade -> rewrite/generate -> validate citations -> answer
 ```
 
-| Stage | Implementation |
-|---|---|
-| Loading | `pypdf` (per page), `docx2txt`, plain text/Markdown; multi-file upload |
-| Chunking | LangChain `RecursiveCharacterTextSplitter`, page metadata kept on every chunk |
-| Embeddings | `all-MiniLM-L6-v2` (384-d) on ONNX Runtime via `fastembed`: no PyTorch, fits a 512 MB instance |
-| Vector store | FAISS `IndexFlatIP` or ChromaDB (cosine HNSW), switchable in the UI |
-| Agent | LangGraph state machine: retrieve → grade → rewrite/generate → cite |
-| Generation | Anthropic Claude (LangChain `ChatAnthropic`), Hugging Face Inference (Mistral-7B-Instruct), or a no-key extractive fallback |
-| Guardrails | Answers only from context, `[n]` citations required, out-of-range citations dropped, abstains when nothing relevant |
-| Observability | Per-query agent trace in the UI and JSONL query logs (`logs/queries.jsonl`) with latency |
-| UI | Gradio Blocks with chat, sources panel and agent-trace panel |
+See the existing rag package for the pipeline and eval directory for the labeled retrieval/answer regression set.
 
-## Evaluation
+## HTTP API for Nexus AI
 
-`eval/` holds a small labeled set: 16 questions over 3 documents, including 2 that the documents can't answer.
+A small FastAPI adapter exposes the existing DocQA engine. It is a separate local process from the Gradio demo; it uses the same implementation under rag.
 
-```bash
-python -m eval.run_eval                  # MiniLM + FAISS + extractive answers
-python -m eval.run_eval --llm anthropic  # grade Claude's answers (needs ANTHROPIC_API_KEY)
-python -m eval.run_eval --store chroma   # compare vector stores
-```
+From the repository root:
 
-It reports **hit@k**, **MRR**, **answer accuracy**, **citation precision** and **abstention accuracy**, and lists every failing case. CI runs the same eval with an offline embedder and fails the build if retrieval drops below the baseline.
-
-## Run locally
-
-```bash
-git clone https://github.com/mrchandrabhan/agentic-rag-docqa
-cd agentic-rag-docqa
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...   # optional; or HF_TOKEN=hf_...; or neither (extractive mode)
-python app.py                          # http://localhost:7860
-```
-
-Docker: `docker build -t agentic-rag . && docker run -p 7860:7860 -e ANTHROPIC_API_KEY agentic-rag`
-
-## Deploy
-
-### Render (free, used for the live demo)
-
-`render.yaml` is a Render Blueprint: on render.com choose **New → Blueprint**, pick this repo, **Apply**. The build installs dependencies and pre-downloads the embedding model; every push to `main` redeploys.
-
-### GitHub + Hugging Face Spaces
-
-Hugging Face now requires a PRO plan to host Gradio Spaces. With one, a single command publishes both. It asks you to log in to GitHub in the browser and for a Hugging Face Write token the first time.
+**Windows PowerShell**
 
 ```powershell
-# Windows (needs Git, GitHub CLI, Python: winget install Git.Git GitHub.cli Python.Python.3.12)
-powershell -ExecutionPolicy Bypass -File .\publish.ps1
+$env:EMBEDDER = "hash"
+uvicorn api:app --host 0.0.0.0 --port 7861
 ```
+
+Use EMBEDDER=minilm for the MiniLM semantic embedder after the model is available locally. The hash embedder is quick and deterministic for offline development but is less semantically capable. Set ANTHROPIC_API_KEY or HF_TOKEN to use a hosted answer model; without credentials the existing extractive answer mode is used.
+
+Endpoints:
+
+- GET /health — process liveness, no model load.
+- GET /ready — initialize/check the RAG engine and return model/index details.
+- GET /api/v1/documents — list sample and uploaded documents in this process.
+- POST /api/v1/documents — index a PDF, DOCX, TXT, or Markdown file (10 MiB maximum).
+- POST /api/v1/ask — answer a question with citations, trace, and latency.
+
+Open http://localhost:7861/docs for interactive API documentation.
+
+The service currently uses a process-local vector index. Sample corpus files are indexed when the engine first initializes; additional uploads are added to that in-memory index. Restarting the API rebuilds the sample corpus and clears additional uploads. This is a local integration adapter, not a multi-tenant production service. Keep it on a trusted development machine until authentication, scoped retrieval, rate limits, and persistent indexing are implemented.
+
+## Evaluate
 
 ```bash
-# macOS / Linux (needs git, gh, python3)
-./publish.sh
+python -m eval.run_eval
+python -m eval.run_eval --llm anthropic
+python -m eval.run_eval --store chroma
 ```
 
-It creates the GitHub repo, pushes, creates the Gradio Space and uploads the app.
+The 16-question evaluation set measures hit@k, MRR, answer accuracy, citation precision, and abstention accuracy.
 
-**Continuous deploy:** add a Hugging Face *Write* token as the GitHub Actions secret `HF_TOKEN`. Every push to `main` then redeploys the Space via `.github/workflows/deploy-space.yml`, and CI publishes a MiniLM eval table (FAISS vs ChromaDB) in the run summary.
+## Run the Gradio UI
 
-> Don't add your Anthropic key as a Render/Space secret unless you're happy for visitors to spend your credits. Without one, the Space answers in extractive mode, or visitors can paste their own key (never stored).
+```bash
+python app.py
+```
+
+Open http://localhost:7860. Click **Load sample documents** to try the included runbooks.
 
 ## Tests
 
@@ -98,40 +83,4 @@ pip install -r requirements-ci.txt
 pytest -q
 ```
 
-21 offline tests (no model downloads or API keys) cover loaders, chunking, both vector stores, the agent's rewrite/abstain paths, citation validation, JSONL logging, and the eval regression gate.
-
-## Project layout
-
-```
-app.py              Gradio UI (sample docs + example questions)
-render.yaml         Render Blueprint (free live demo)
-rag/loaders.py      page-aware file loading
-rag/chunking.py     chunking with source/page metadata
-rag/embeddings.py   MiniLM (ONNX) embedder + offline hash embedder
-rag/stores.py       FAISS and ChromaDB behind one interface
-rag/llm.py          Claude / Hugging Face / extractive backends
-rag/graph.py        LangGraph agent
-rag/pipeline.py     DocQA: ingest + ask + JSONL logging
-eval/               labeled dataset, sample corpus, metrics
-tests/              pytest suite
-```
-
-## Configuration
-
-| Env var | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | – | Use Claude for answers |
-| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | Claude model |
-| `HF_TOKEN` | – | Use the Hugging Face Inference API |
-| `HF_MODEL` | `mistralai/Mistral-7B-Instruct-v0.3` | HF model |
-| `EMBEDDER` | `minilm` | `hash` for an offline, download-free embedder |
-| `MODEL_CACHE` | `./.models` | Where the embedding model is cached |
-| `PORT` | `7860` | Port to bind (set automatically on Render) |
-
-## Roadmap
-
-- Hybrid search (BM25 + vectors) and a cross-encoder reranker
-- LLM-as-judge faithfulness scoring in the eval
-- Persisted indexes between sessions
-
-MIT © Chandrabhan Singh Vaghela
+Offline tests use the deterministic hash embedder and do not need model downloads or API credentials.
