@@ -22,6 +22,10 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 CORPUS_DIR = Path(__file__).parent / "eval" / "corpus"
 
 
+class NoExtractableTextError(ValueError):
+    """Upload parsed, but contained no text chunks that can be indexed."""
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
@@ -90,6 +94,15 @@ class RAGEngine:
             if digest in self.documents:
                 raise FileExistsError("This exact document has already been indexed.")
             stats = self.qa.ingest([destination])
+            if stats.get("chunks", 0) < 1 or stats.get("pages", 0) < 1:
+                destination.unlink(missing_ok=True)
+                try:
+                    destination.parent.rmdir()
+                except OSError:
+                    pass
+                raise NoExtractableTextError(
+                    "No readable text was extracted. This may be an image-only scanned PDF; OCR is not enabled."
+                )
             self.documents[digest] = {
                 "filename": safe_name,
                 "sha256": digest,
@@ -205,6 +218,8 @@ async def upload_document(
         return engine.ingest_bytes(file.filename, content)
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except NoExtractableTextError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from exc
     except Exception as exc:

@@ -40,8 +40,15 @@ def _fmt_sources(cites: list[dict]) -> str:
 def _index(paths, store_kind):
     qa = DocQA(embedder=embedder(), store=store_kind, log_path="logs/queries.jsonl")
     stats = qa.ingest(paths)
-    msg = (f"Indexed **{stats['files']} file(s)**, {stats['pages']} pages → {stats['chunks']} chunks "
-           f"in **{store_kind.upper()}** using `{qa.embedder.model_name}`.")
+    if stats["chunks"] < 1:
+        raise ValueError(
+            "No readable text was extracted. The PDF may be image-only/scanned; OCR is not enabled."
+        )
+    msg = (
+        f"Indexed **{stats['files']} file(s)**, {stats['pages']} pages, "
+        f"{stats.get('characters', 0):,} characters → {stats['chunks']} chunks "
+        f"in **{store_kind.upper()}** using `{qa.embedder.model_name}`."
+    )
     return qa, msg
 
 

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from api import app, get_qa
+from api import NoExtractableTextError, RAGEngine, app, get_qa
 
 
 class FakeEngine:
@@ -122,3 +122,21 @@ def test_retrieve_endpoint_exposes_model_and_source_debug_details():
         assert body["results"][0]["page"] == 1
     finally:
         teardown_client(client)
+
+
+
+def test_empty_extraction_is_not_registered_as_indexed(tmp_path):
+    class EmptyQA:
+        def ingest(self, paths):
+            return {"files": 0, "pages": 0, "chunks": 0, "characters": 0}
+
+    engine = RAGEngine.__new__(RAGEngine)
+    engine.qa = EmptyQA()
+    engine._lock = __import__("threading").RLock()
+    engine.upload_root = tmp_path
+    engine.documents = {}
+
+    import pytest
+    with pytest.raises(NoExtractableTextError, match="No readable text"):
+        engine.ingest_bytes("scanned-resume.pdf", b"%PDF-1.7 image-only content")
+    assert engine.documents == {}
