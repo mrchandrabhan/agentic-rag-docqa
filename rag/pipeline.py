@@ -10,10 +10,13 @@ from .embeddings import make_embedder
 from .graph import build_graph
 from .llm import make_llm
 from .loaders import load_files
+from .retrieval import hybrid_search
 from .stores import make_store
 
-# Relevance floor depends on the embedder's score scale.
-MIN_SCORE = {"minilm": 0.25, "hash": 0.08}
+# Minimum semantic similarity depends on the embedder's score scale. Hybrid
+# retrieval also admits BM25 lexical matches, then uses reciprocal-rank fusion.
+SEMANTIC_MIN_SCORE = {"minilm": 0.25, "hash": 0.08}
+HYBRID_MIN_SCORE = 0.012
 
 
 class DocQA:
@@ -21,7 +24,8 @@ class DocQA:
                  chunk_size: int = 800, chunk_overlap: int = 120, log_path: str | None = None):
         self.embedder = make_embedder(embedder) if isinstance(embedder, str) else embedder
         kind = "hash" if self.embedder.model_name.startswith("hash") else "minilm"
-        self.min_score = MIN_SCORE[kind]
+        self.semantic_min_score = SEMANTIC_MIN_SCORE[kind]
+        self.min_score = HYBRID_MIN_SCORE
         self.store_kind = store
         self.store = make_store(store, self.embedder.dim)
         self.llm = llm or make_llm("extractive")
@@ -40,7 +44,12 @@ class DocQA:
             self.store.add(chunks, self.embedder.embed([c.text for c in chunks]))
         self.sources += sorted({p.source for p in pages} - set(self.sources))
         self._graph = None
-        return {"files": len({p.source for p in pages}), "pages": len(pages), "chunks": len(chunks)}
+        return {
+            "files": len({p.source for p in pages}),
+            "pages": len(pages),
+            "chunks": len(chunks),
+            "characters": sum(len(page.text) for page in pages),
+        }
 
     def set_llm(self, llm) -> None:
         self.llm, self._graph = llm, None
@@ -48,7 +57,14 @@ class DocQA:
     @property
     def graph(self):
         if self._graph is None:
-            self._graph = build_graph(self.store, self.embedder, self.llm, k=self.k, min_score=self.min_score)
+            self._graph = build_graph(
+                self.store,
+                self.embedder,
+                self.llm,
+                k=self.k,
+                min_score=self.min_score,
+                semantic_min_score=self.semantic_min_score,
+            )
         return self._graph
 
     def ask(self, question: str) -> dict:
@@ -63,10 +79,20 @@ class DocQA:
         }
         if self.log_path:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_path.open("a") as f:
-                f.write(json.dumps({k: v for k, v in result.items() if k != "citations"}
-                                   | {"sources": [f"{c['source']}:p{c['page']}" for c in result["citations"]]}) + "\n")
+            with self.log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(
+                    {k: v for k, v in result.items() if k != "citations"}
+                    | {"sources": [f"{c['source']}:p{c['page']}" for c in result["citations"]]}
+                ) + "\n")
         return result
 
     def retrieve(self, question: str, k: int | None = None):
-        return self.store.search(self.embedder.embed([question])[0], k or self.k)
+        vector = self.embedder.embed([question])[0]
+        return hybrid_search(
+            self.store.chunks,
+            self.store.search,
+            vector,
+            question,
+            k or self.k,
+            self.semantic_min_score,
+        )

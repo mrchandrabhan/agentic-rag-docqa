@@ -30,7 +30,23 @@ class FakeEngine:
         return {"filename": filename, "files": 1, "pages": 1, "chunks": 1}
 
     def list_documents(self):
-        return [{"filename": name, "source": "upload"} for name, _ in self.indexed]
+        return [{"filename": name, "source": "upload", "chunks": 1} for name, _ in self.indexed]
+
+    def retrieve(self, question, limit=8):
+        return {
+            "question": question,
+            "embedding_model": "hash-1024",
+            "answer_model": "extractive",
+            "results": [
+                {
+                    "rank": 1,
+                    "source": "incident-runbook.md",
+                    "page": 1,
+                    "score": 0.02,
+                    "text": "Acknowledge a production incident within five minutes.",
+                }
+            ][:limit],
+        }
 
 
 def setup_client():
@@ -88,5 +104,21 @@ def test_empty_question_is_rejected():
     try:
         response = client.post("/api/v1/ask", json={"question": "   "})
         assert response.status_code == 422
+    finally:
+        teardown_client(client)
+
+
+def test_retrieve_endpoint_exposes_model_and_source_debug_details():
+    client, _ = setup_client()
+    try:
+        response = client.post(
+            "/api/v1/retrieve",
+            json={"question": "What is the incident acknowledgement target?", "limit": 5},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["embedding_model"] == "hash-1024"
+        assert body["results"][0]["source"] == "incident-runbook.md"
+        assert body["results"][0]["page"] == 1
     finally:
         teardown_client(client)

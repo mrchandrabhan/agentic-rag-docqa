@@ -34,6 +34,10 @@ class AskRequest(BaseModel):
         return normalized
 
 
+class RetrieveRequest(AskRequest):
+    limit: int = Field(default=8, ge=1, le=20)
+
+
 class RAGEngine:
     """Process-local index over the existing agentic RAG implementation."""
 
@@ -54,13 +58,17 @@ class RAGEngine:
             if path.is_file() and path.suffix.lower() in SUPPORTED
         )
         if sample_files:
-            self.qa.ingest(sample_files)
+            total_stats = self.qa.ingest(sample_files)
+            per_file_chunks = max(
+                1, total_stats["chunks"] // len(sample_files)
+            )
             for path in sample_files:
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 self.documents[digest] = {
                     "filename": path.name,
                     "sha256": digest,
                     "source": "sample",
+                    "chunks": per_file_chunks,
                 }
 
     def ingest_bytes(self, filename: str, content: bytes) -> dict[str, Any]:
@@ -71,9 +79,6 @@ class RAGEngine:
             raise ValueError("The uploaded file is empty.")
 
         digest = hashlib.sha256(content).hexdigest()
-        if digest in self.documents:
-            raise FileExistsError("This exact document has already been indexed.")
-
         safe_name = PurePosixPath(filename.replace("\\", "/")).name
         if not safe_name or safe_name in {".", ".."}:
             raise ValueError("A valid filename is required.")
@@ -89,6 +94,7 @@ class RAGEngine:
                 "filename": safe_name,
                 "sha256": digest,
                 "source": "upload",
+                "chunks": stats["chunks"],
             }
             return {"filename": safe_name, "sha256": digest, **stats}
 
@@ -104,10 +110,33 @@ class RAGEngine:
             "engine": "agentic-rag-docqa",
         }
 
-    def list_documents(self) -> list[dict[str, str]]:
+    def retrieve(self, question: str, limit: int = 8) -> dict[str, Any]:
+        with self._lock:
+            hits = self.qa.retrieve(question, k=limit)
+            return {
+                "question": question,
+                "embedding_model": self.qa.embedder.model_name,
+                "answer_model": self.qa.llm.name,
+                "results": [
+                    {
+                        "rank": rank,
+                        "source": chunk.source,
+                        "page": chunk.page,
+                        "score": round(float(score), 4),
+                        "text": chunk.text[:1200],
+                    }
+                    for rank, (chunk, score) in enumerate(hits, start=1)
+                ],
+            }
+
+    def list_documents(self) -> list[dict[str, Any]]:
         with self._lock:
             return [
-                {"filename": item["filename"], "source": item["source"]}
+                {
+                    "filename": item["filename"],
+                    "source": item["source"],
+                    "chunks": item.get("chunks", 0),
+                }
                 for item in self.documents.values()
             ]
 
@@ -134,8 +163,8 @@ def get_qa(request: Request) -> RAGEngine:
 
 app = FastAPI(
     title="Agentic RAG Service API",
-    description="HTTP adapter for the existing agentic RAG retrieval and citation engine.",
-    version="1.0.0",
+    description="HTTP adapter for the existing hybrid retrieval and citation engine.",
+    version="1.1.0",
 )
 
 
@@ -150,7 +179,10 @@ def ready(engine: RAGEngine = Depends(get_qa)) -> dict[str, Any]:
         "status": "ready",
         "engine": "agentic-rag-docqa",
         "embedding_model": engine.qa.embedder.model_name,
+        "answer_model": engine.qa.llm.name,
+        "retrieval": "hybrid-vector-and-lexical",
         "indexed_documents": len(engine.documents),
+        "indexed_chunks": len(engine.qa.store),
     }
 
 
@@ -179,9 +211,14 @@ async def upload_document(
         raise HTTPException(status_code=422, detail="The document could not be parsed and indexed.") from exc
 
 
+@app.post("/api/v1/retrieve", tags=["retrieval"])
+def retrieve(request: RetrieveRequest, engine: RAGEngine = Depends(get_qa)) -> dict[str, Any]:
+    return engine.retrieve(request.question, request.limit)
+
+
 @app.post("/api/v1/ask", tags=["retrieval"])
 def ask(request: AskRequest, engine: RAGEngine = Depends(get_qa)) -> dict[str, Any]:
     try:
-        return engine.ask(request.question.strip())
+        return engine.ask(request.question)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="The RAG engine failed to answer the question.") from exc
