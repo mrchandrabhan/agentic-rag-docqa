@@ -108,7 +108,7 @@ def hybrid_search(
             # single-word matches are not enough to retrieve an unrelated chunk.
             distinctive_single = (
                 len(matched) == 1
-                and len(matched[0]) >= 5
+                and (len(matched[0]) >= 5 or any(char.isdigit() for char in matched[0]))
                 and matched[0] not in GENERIC_SINGLE_MATCH_TERMS
                 and doc_freq.get(matched[0], total_docs) < total_docs
             )
