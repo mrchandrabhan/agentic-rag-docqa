@@ -81,6 +81,19 @@ class ExtractiveLLM:
                 if overlap >= need:
                     scored.append((overlap, sent.strip(), n))
         if not scored:
+            # The retrieval graph has already filtered the context for relevance.
+            # In no-key mode we cannot safely paraphrase synonyms, so expose the
+            # leading source sentence instead of silently discarding useful evidence.
+            for match in re.finditer(r"\[(\d+)\] (.+?)(?=\n\[\d+\] |\n\nQUESTION:|\Z)", user, re.S):
+                citation, body = match.group(1), match.group(2)
+                body = re.sub(r"^#+\s*.*$", "", body, flags=re.M)
+                sentences = [
+                    sentence.strip()
+                    for sentence in re.split(r"(?<=[.!?])\s+", body.replace("\n", " "))
+                    if len(sentence.strip()) >= 25
+                ]
+                if sentences:
+                    return f"Relevant passage: {sentences[0]} [{citation}]"
             return "I couldn't find that in the uploaded documents."
         scored.sort(key=lambda x: -x[0])
         return " ".join(f"{s} [{n}]" for _, s, n in scored[:2])

@@ -201,3 +201,17 @@ def test_chroma_store_matches_faiss_top_hit():
     hits = q.retrieve("How many partitions does the click events topic have?")
     assert hits[0][0].source == "kafka_pipeline_guide.txt"
     assert "48 hours" in q.ask("When does the locker code expire?")["answer"]
+
+
+
+def test_extractive_fallback_surfaces_ranked_passage_when_question_uses_synonyms():
+    prompt = (
+        "CONTEXT:\n"
+        "[1] Skills include Python, Terraform, Ansible, Azure and Kubernetes. "
+        "The candidate has automated infrastructure deployments.\n\n"
+        "QUESTION: Which technologies are part of this person's technical toolkit?"
+    )
+    answer = ExtractiveLLM().complete("Use only the context.", prompt)
+    assert answer.startswith("Relevant passage:")
+    assert "Terraform" in answer
+    assert answer.endswith("[1]")
