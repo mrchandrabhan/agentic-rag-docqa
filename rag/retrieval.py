@@ -15,6 +15,13 @@ from typing import Iterable
 from .chunking import Chunk
 
 
+GENERIC_SINGLE_MATCH_TERMS = {
+    "company", "database", "document", "documents", "experience", "infrastructure",
+    "information", "organization", "organizations", "payroll", "policy", "project",
+    "projects", "region", "responsibility", "responsibilities", "service", "services",
+    "skill", "skills", "system", "systems", "team", "teams", "work", "workflow",
+}
+
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "been", "being", "by", "can",
     "could", "did", "do", "does", "for", "from", "had", "has", "have", "how",
@@ -102,6 +109,7 @@ def hybrid_search(
             distinctive_single = (
                 len(matched) == 1
                 and len(matched[0]) >= 5
+                and matched[0] not in GENERIC_SINGLE_MATCH_TERMS
                 and doc_freq.get(matched[0], total_docs) < total_docs
             )
             if coverage >= 0.25 or len(matched) >= 2 or distinctive_single:
