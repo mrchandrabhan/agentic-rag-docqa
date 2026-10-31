@@ -216,8 +216,8 @@ def test_extractive_fallback_surfaces_ranked_passage_when_question_uses_synonyms
         "QUESTION: Which technologies are part of this person's technical toolkit?"
     )
     answer = ExtractiveLLM().complete("Use only the context.", prompt)
-    assert answer.startswith("Relevant passage:")
-    assert "Terraform" in answer
+    assert answer.startswith("Relevant details from the uploaded documents:")
+    assert "Terraform" in answer and "Kubernetes" in answer
     assert answer.endswith("[1]")
 
 
@@ -232,13 +232,13 @@ def test_extractive_answer_returns_multiple_grounded_technology_details():
     assert "Python" in answer and "C++" in answer and "Terraform" in answer
     assert "Kubernetes" in answer and "Azure" in answer and "AWS" in answer
     assert "[1]" in answer and "[2]" in answer
-    assert answer.count("\\n- ") >= 1
+    assert answer.count("\n- ") >= 1
 
 
 def test_extractive_answer_preserves_exact_acronyms_and_versions():
     prompt = (
-        "CONTEXT:\\n"
-        "[1] The service uses C++, C#, CI/CD, and .NET 8 for its build and deployment workflow.\\n\\n"
+        "CONTEXT:\n"
+        "[1] The service uses C++, C#, CI/CD, and .NET 8 for its build and deployment workflow.\n\n"
         "QUESTION: Which programming and deployment technologies are mentioned?"
     )
     answer = ExtractiveLLM().complete("Use only the context.", prompt)
