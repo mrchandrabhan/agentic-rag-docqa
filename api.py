@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
-import tempfile
 import threading
 import uuid
 from pathlib import Path, PurePosixPath
@@ -18,8 +18,10 @@ from rag.llm import make_llm
 from rag.loaders import SUPPORTED
 
 
+logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 CORPUS_DIR = Path(__file__).parent / "eval" / "corpus"
+DEFAULT_UPLOAD_DIR = Path(__file__).parent / ".data" / "uploads"
 
 
 class NoExtractableTextError(ValueError):
@@ -43,7 +45,7 @@ class RetrieveRequest(AskRequest):
 
 
 class RAGEngine:
-    """Process-local index over the existing agentic RAG implementation."""
+    """Hybrid RAG engine with persistent uploaded source files and a rebuilt in-memory index."""
 
     def __init__(self) -> None:
         embedder_kind = os.getenv("EMBEDDER", "minilm")
@@ -54,7 +56,9 @@ class RAGEngine:
             llm=make_llm(),
             log_path=os.getenv("RAG_QUERY_LOG", "logs/nexus-queries.jsonl"),
         )
-        self.upload_root = Path(tempfile.mkdtemp(prefix="agentic-rag-api-"))
+        upload_dir = Path(os.getenv("RAG_UPLOAD_DIR", str(DEFAULT_UPLOAD_DIR))).expanduser()
+        self.upload_root = upload_dir.resolve()
+        self.upload_root.mkdir(parents=True, exist_ok=True)
         self.documents: dict[str, dict[str, Any]] = {}
 
         sample_files = sorted(
@@ -62,18 +66,49 @@ class RAGEngine:
             if path.is_file() and path.suffix.lower() in SUPPORTED
         )
         if sample_files:
-            total_stats = self.qa.ingest(sample_files)
-            per_file_chunks = max(
-                1, total_stats["chunks"] // len(sample_files)
-            )
+            self.qa.ingest(sample_files)
             for path in sample_files:
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 self.documents[digest] = {
                     "filename": path.name,
                     "sha256": digest,
                     "source": "sample",
-                    "chunks": per_file_chunks,
+                    "chunks": sum(
+                        1 for chunk in self.qa.store.chunks if chunk.source == path.name
+                    ),
                 }
+
+        self._restore_uploaded_documents()
+
+    def _restore_uploaded_documents(self) -> None:
+        """Re-index files from the persistent upload directory after a service restart."""
+        for path in sorted(self.upload_root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in SUPPORTED:
+                continue
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                if digest in self.documents:
+                    continue
+                stats = self.qa.ingest([path])
+                if stats.get("chunks", 0) < 1 or stats.get("pages", 0) < 1:
+                    logger.warning("Skipping persisted upload with no extractable text: %s", path.name)
+                    continue
+                self.documents[digest] = {
+                    "filename": path.name,
+                    "sha256": digest,
+                    "source": "upload",
+                    "chunks": stats["chunks"],
+                }
+            except Exception:
+                logger.exception("Could not restore persisted upload: %s", path.name)
+
+    @staticmethod
+    def _remove_upload(destination: Path) -> None:
+        destination.unlink(missing_ok=True)
+        try:
+            destination.parent.rmdir()
+        except OSError:
+            pass
 
     def ingest_bytes(self, filename: str, content: bytes) -> dict[str, Any]:
         extension = PurePosixPath(filename.lower()).suffix
@@ -87,22 +122,23 @@ class RAGEngine:
         if not safe_name or safe_name in {".", ".."}:
             raise ValueError("A valid filename is required.")
 
-        destination = self.upload_root / str(uuid.uuid4()) / safe_name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(content)
         with self._lock:
             if digest in self.documents:
                 raise FileExistsError("This exact document has already been indexed.")
-            stats = self.qa.ingest([destination])
-            if stats.get("chunks", 0) < 1 or stats.get("pages", 0) < 1:
-                destination.unlink(missing_ok=True)
-                try:
-                    destination.parent.rmdir()
-                except OSError:
-                    pass
-                raise NoExtractableTextError(
-                    "No readable text was extracted. This may be an image-only scanned PDF; OCR is not enabled."
-                )
+
+            destination = self.upload_root / str(uuid.uuid4()) / safe_name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
+            try:
+                stats = self.qa.ingest([destination])
+                if stats.get("chunks", 0) < 1 or stats.get("pages", 0) < 1:
+                    raise NoExtractableTextError(
+                        "No readable text was extracted. This may be an image-only scanned PDF; OCR is not enabled."
+                    )
+            except Exception:
+                self._remove_upload(destination)
+                raise
+
             self.documents[digest] = {
                 "filename": safe_name,
                 "sha256": digest,
@@ -176,8 +212,8 @@ def get_qa(request: Request) -> RAGEngine:
 
 app = FastAPI(
     title="Agentic RAG Service API",
-    description="HTTP adapter for the existing hybrid retrieval and citation engine.",
-    version="1.1.0",
+    description="HTTP adapter for the existing hybrid retrieval and local citation engine.",
+    version="1.2.0",
 )
 
 
@@ -194,6 +230,7 @@ def ready(engine: RAGEngine = Depends(get_qa)) -> dict[str, Any]:
         "embedding_model": engine.qa.embedder.model_name,
         "answer_model": engine.qa.llm.name,
         "retrieval": "hybrid-vector-and-lexical",
+        "upload_persistence": "disk-backed; reindexed on startup",
         "indexed_documents": len(engine.documents),
         "indexed_chunks": len(engine.qa.store),
     }

@@ -57,7 +57,7 @@ Endpoints:
 
 Open http://localhost:7861/docs for interactive API documentation.
 
-The service currently uses a process-local vector index. Sample corpus files are indexed when the engine first initializes; additional uploads are added to that in-memory index. Restarting the API rebuilds the sample corpus and clears additional uploads. This is a local integration adapter, not a multi-tenant production service. Keep it on a trusted development machine until authentication, scoped retrieval, rate limits, and persistent indexing are implemented.
+The vector index is rebuilt in memory at service startup. Uploaded source files are stored on disk in `.data/uploads` by default (or in `RAG_UPLOAD_DIR`) and re-indexed after a restart. Nexus Docker Compose mounts a named volume for uploads and a separate volume for the MiniLM model cache. The service is still a local integration adapter, not a multi-tenant production service: keep it on a trusted development machine until authentication, scoped retrieval, service authentication, and rate limits are implemented.
 
 ## Evaluate
 

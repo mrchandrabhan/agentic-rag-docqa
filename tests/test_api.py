@@ -140,3 +140,31 @@ def test_empty_extraction_is_not_registered_as_indexed(tmp_path):
     with pytest.raises(NoExtractableTextError, match="No readable text"):
         engine.ingest_bytes("scanned-resume.pdf", b"%PDF-1.7 image-only content")
     assert engine.documents == {}
+
+
+def test_persistent_uploads_are_reindexed_after_engine_restart(monkeypatch, tmp_path):
+    import pytest
+
+    upload_root = tmp_path / "uploads"
+    monkeypatch.setenv("RAG_UPLOAD_DIR", str(upload_root))
+    monkeypatch.setenv("EMBEDDER", "hash")
+    monkeypatch.setenv("RAG_STORE", "faiss")
+    monkeypatch.setenv("RAG_QUERY_LOG", str(tmp_path / "queries.jsonl"))
+
+    first = RAGEngine()
+    content = b"Resume technologies: Azure, Terraform, Kubernetes, Python and Docker."
+    first.ingest_bytes("resume.txt", content)
+
+    with pytest.raises(FileExistsError):
+        first.ingest_bytes("duplicate.txt", content)
+    stored_files = list(upload_root.rglob("resume.txt"))
+    assert len(stored_files) == 1
+
+    restarted = RAGEngine()
+    documents = restarted.list_documents()
+    assert any(
+        item["filename"] == "resume.txt" and item["source"] == "upload"
+        for item in documents
+    )
+    retrieved = restarted.retrieve("Azure Terraform Kubernetes", limit=8)
+    assert any(item["source"] == "resume.txt" for item in retrieved["results"])
