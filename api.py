@@ -51,7 +51,7 @@ class RAGEngine:
         self.qa = DocQA(
             embedder=make_embedder(embedder_kind),
             store=os.getenv("RAG_STORE", "faiss"),
-            llm=make_llm(os.getenv("LLM_PROVIDER", "auto")),
+            llm=make_llm(),
             log_path=os.getenv("RAG_QUERY_LOG", "logs/nexus-queries.jsonl"),
         )
         self.upload_root = Path(tempfile.mkdtemp(prefix="agentic-rag-api-"))

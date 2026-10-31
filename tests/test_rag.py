@@ -178,10 +178,14 @@ def test_jsonl_query_log(tmp_path):
 
 
 # ---------- llm selection ----------
-def test_make_llm_falls_back_to_extractive(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("HF_TOKEN", raising=False)
+def test_make_llm_stays_local_even_if_external_tokens_are_set(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-used")
+    monkeypatch.setenv("HF_TOKEN", "not-used")
     assert make_llm("auto").name == "extractive"
+    assert make_llm("extractive").name == "extractive"
+
+    with pytest.raises(ValueError, match="local extractive"):
+        make_llm("hosted")
 
 
 # ---------- eval regression gate ----------
@@ -215,3 +219,28 @@ def test_extractive_fallback_surfaces_ranked_passage_when_question_uses_synonyms
     assert answer.startswith("Relevant passage:")
     assert "Terraform" in answer
     assert answer.endswith("[1]")
+
+
+def test_extractive_answer_returns_multiple_grounded_technology_details():
+    prompt = (
+        "CONTEXT:\n"
+        "[1] Technical Skills: Python, C++, SQL, Terraform, Kubernetes, Docker, and Microsoft Azure.\n"
+        "[2] Built a CI/CD release pipeline with GitHub Actions and deployed services to AWS.\n\n"
+        "QUESTION: Which cloud platforms, DevOps tools, programming languages, and infrastructure technologies are listed?"
+    )
+    answer = ExtractiveLLM().complete("Use only the context.", prompt)
+    assert "Python" in answer and "C++" in answer and "Terraform" in answer
+    assert "Kubernetes" in answer and "Azure" in answer and "AWS" in answer
+    assert "[1]" in answer and "[2]" in answer
+    assert answer.count("\\n- ") >= 1
+
+
+def test_extractive_answer_preserves_exact_acronyms_and_versions():
+    prompt = (
+        "CONTEXT:\\n"
+        "[1] The service uses C++, C#, CI/CD, and .NET 8 for its build and deployment workflow.\\n\\n"
+        "QUESTION: Which programming and deployment technologies are mentioned?"
+    )
+    answer = ExtractiveLLM().complete("Use only the context.", prompt)
+    assert "C++" in answer and "C#" in answer and "CI/CD" in answer
+    assert ".NET 8" in answer and "[1]" in answer

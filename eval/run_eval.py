@@ -2,7 +2,6 @@
 
 python -m eval.run_eval                      # MiniLM + FAISS + extractive answers
 python -m eval.run_eval --embedder hash      # offline (what CI runs)
-python -m eval.run_eval --llm anthropic      # grade Claude's answers (needs ANTHROPIC_API_KEY)
 """
 from __future__ import annotations
 
@@ -24,8 +23,8 @@ def hit_rank(hits, source, keyword) -> int | None:
     return None
 
 
-def evaluate(embedder="minilm", store="faiss", llm="extractive", k=4, chunk_size=300, chunk_overlap=50) -> dict:
-    qa = DocQA(embedder=embedder, store=store, llm=make_llm(llm), k=k,
+def evaluate(embedder="minilm", store="faiss", k=4, chunk_size=300, chunk_overlap=50) -> dict:
+    qa = DocQA(embedder=embedder, store=store, llm=make_llm(), k=k,
                chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     qa.ingest(sorted((HERE / "corpus").iterdir()))
     rows = [json.loads(l) for l in (HERE / "dataset.jsonl").read_text().splitlines() if l.strip()]
@@ -71,8 +70,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--embedder", default="minilm", choices=["minilm", "hash"])
     ap.add_argument("--store", default="faiss", choices=["faiss", "chroma"])
-    ap.add_argument("--llm", default="extractive", choices=["extractive", "anthropic", "huggingface"])
     ap.add_argument("--k", type=int, default=4)
     ap.add_argument("--chunk-size", type=int, default=300)
     a = ap.parse_args()
-    print(json.dumps(evaluate(a.embedder, a.store, a.llm, a.k, a.chunk_size), indent=2))
+    print(json.dumps(evaluate(a.embedder, a.store, a.k, a.chunk_size), indent=2))

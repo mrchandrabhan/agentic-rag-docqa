@@ -26,7 +26,7 @@ This repository is the reusable knowledge and retrieval engine for the separate 
 
 ```
 upload -> page-aware load -> chunk -> MiniLM embeddings -> FAISS or Chroma
-question -> retrieve -> grade -> rewrite/generate -> validate citations -> answer
+question -> retrieve -> grade -> rewrite (when needed) -> extractive answer -> validate citations
 ```
 
 See the existing rag package for the pipeline and eval directory for the labeled retrieval/answer regression set.
@@ -44,7 +44,7 @@ $env:EMBEDDER = "minilm"
 uvicorn api:app --host 0.0.0.0 --port 7861
 ```
 
-Use EMBEDDER=minilm for normal use. MiniLM provides semantic vector retrieval. The hash embedder is only a quick deterministic option for offline CI or smoke tests; it is not a semantic model. Retrieval now combines vector similarity with BM25-style lexical ranking to improve exact technology, acronym, and name matching. Set ANTHROPIC_API_KEY or HF_TOKEN to use a hosted answer model; without credentials the extractive fallback is used and requires more literal word overlap.
+Use EMBEDDER=minilm for normal use. MiniLM provides semantic vector retrieval. The hash embedder is only a quick deterministic option for offline CI or smoke tests; it is not a semantic model. Retrieval combines local MiniLM vectors with BM25-style lexical ranking to improve exact technology, acronym, and name matching. Answer generation is fully local and deterministic: it selects relevant sentences from retrieved passages, adds source citations, and abstains when retrieval finds no evidence. No hosted LLM API keys or external inference service are used.
 
 Endpoints:
 
@@ -63,7 +63,6 @@ The service currently uses a process-local vector index. Sample corpus files are
 
 ```bash
 python -m eval.run_eval
-python -m eval.run_eval --llm anthropic
 python -m eval.run_eval --store chroma
 ```
 
